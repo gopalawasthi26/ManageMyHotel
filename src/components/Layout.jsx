@@ -12,9 +12,9 @@ import {
   ListItem,
   ListItemIcon,
   ListItemText,
-  Avatar,
   Menu,
   MenuItem,
+  Avatar,
 } from "@mui/material";
 import {
   Menu as MenuIcon,
@@ -22,12 +22,13 @@ import {
   Person as PersonIcon,
   Hotel as HotelIcon,
   History as HistoryIcon,
-  People as PeopleIcon,
   Settings as SettingsIcon,
   Logout as LogoutIcon,
-  AccountCircle,
+  CleaningServices as CleaningServicesIcon,
+  Build as BuildIcon,
 } from "@mui/icons-material";
 import { useAuth } from "../contexts/AuthContext";
+import ChatBot from "./ChatBot";
 
 const drawerWidth = 240;
 
@@ -59,186 +60,160 @@ const Layout = ({ children }) => {
     }
   };
 
-  const userMenuItems = [
-    { text: "Dashboard", icon: <DashboardIcon />, path: "/user" },
-    { text: "Book a Room", icon: <HotelIcon />, path: "/user/rooms" },
-    { text: "Booking History", icon: <HistoryIcon />, path: "/user/bookings" },
-    { text: "Profile", icon: <PersonIcon />, path: "/user/profile" },
-  ];
+  const getMenuItems = () => {
+    const userType = currentUser?.userType || 'user';
+    if (userType === 'staff') {
+      return [
+        { text: 'Dashboard', icon: <DashboardIcon />, path: '/staff' },
+        { text: 'Room Management', icon: <HotelIcon />, path: '/staff/rooms' },
+        { text: 'Room Status', icon: <CleaningServicesIcon />, path: '/staff/room-status' },
+        { text: 'Maintenance', icon: <BuildIcon />, path: '/staff/maintenance' },
+        { text: 'Booking Management', icon: <HistoryIcon />, path: '/staff/bookings' },
+        { text: 'Profile', icon: <PersonIcon />, path: '/staff/profile' },
+      ];
+    } else {
+      return [
+        { text: 'Dashboard', icon: <DashboardIcon />, path: '/user/dashboard' },
+        { text: 'Rooms', icon: <HotelIcon />, path: '/user/rooms' },
+        { text: 'My Bookings', icon: <HistoryIcon />, path: '/user/bookings' },
+        { text: 'Profile', icon: <PersonIcon />, path: '/user/profile' },
+      ];
+    }
+  };
 
-  const staffMenuItems = [
-    { text: "Dashboard", icon: <DashboardIcon />, path: "/staff" },
-    { text: "Manage Rooms", icon: <HotelIcon />, path: "/staff/rooms" },
-    { text: "Manage Bookings", icon: <HistoryIcon />, path: "/staff/bookings" },
-    { text: "Manage Users", icon: <PeopleIcon />, path: "/staff/users" },
-    { text: "Profile", icon: <PersonIcon />, path: "/staff/profile" },
-  ];
-
-  const menuItems = currentUser?.userType === "staff" ? staffMenuItems : userMenuItems;
-
-  const renderMenuItems = (items) => (
-    <List>
-      {items.map((item) => (
-        <ListItem
-          button
-          key={item.text}
-          onClick={() => navigate(item.path)}
-          selected={location.pathname === item.path}
-        >
-          <ListItemIcon>{item.icon}</ListItemIcon>
-          <ListItemText primary={item.text} />
-        </ListItem>
-      ))}
-      <ListItem button onClick={handleLogout}>
-        <ListItemIcon>
-          <LogoutIcon />
-        </ListItemIcon>
-        <ListItemText primary="Logout" />
-      </ListItem>
-    </List>
+  const drawer = (
+    <Box>
+      <Toolbar>
+        <Typography variant="h6" noWrap component="div">
+          {currentUser?.userType === 'staff' ? 'Staff Portal' : 'Guest Portal'}
+        </Typography>
+      </Toolbar>
+      <Divider />
+      <List>
+        {getMenuItems().map((item) => (
+          <ListItem
+            button
+            key={item.text}
+            onClick={() => {
+              navigate(item.path);
+              if (mobileOpen) {
+                setMobileOpen(false);
+              }
+            }}
+          >
+            <ListItemIcon>{item.icon}</ListItemIcon>
+            <ListItemText primary={item.text} />
+          </ListItem>
+        ))}
+      </List>
+    </Box>
   );
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-      {/* Mobile Drawer */}
-      <Drawer
-        variant="temporary"
-        anchor="left"
-        open={mobileOpen}
-        onClose={handleDrawerToggle}
-        ModalProps={{
-          keepMounted: true,
-          container: document.body,
-        }}
-        PaperProps={{
-          sx: {
-            width: 240,
-            backgroundColor: 'background.paper',
-          },
+    <Box sx={{ display: 'flex' }}>
+      <AppBar
+        position="fixed"
+        sx={{
+          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          ml: { sm: `${drawerWidth}px` },
         }}
       >
-        <Box sx={{ p: 2 }}>
-          <Typography variant="h6" noWrap component="div">
-            Hotel Management
+        <Toolbar>
+          <IconButton
+            color="inherit"
+            aria-label="open drawer"
+            edge="start"
+            onClick={handleDrawerToggle}
+            sx={{ mr: 2, display: { sm: 'none' } }}
+          >
+            <MenuIcon />
+          </IconButton>
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
+            Hotel Management System
           </Typography>
-        </Box>
-        <Divider />
-        {renderMenuItems(currentUser?.userType === 'user' ? userMenuItems : staffMenuItems)}
-      </Drawer>
-
-      {/* Desktop Drawer */}
-      <Drawer
-        variant="permanent"
-        PaperProps={{
-          sx: {
-            width: 240,
-            boxSizing: 'border-box',
-            backgroundColor: 'background.paper',
-            borderRight: '1px solid rgba(0, 0, 0, 0.12)',
-          },
-        }}
+          <IconButton
+            onClick={handleMenuOpen}
+            sx={{ p: 0 }}
+          >
+            <Avatar
+              alt={currentUser?.name || 'User'}
+              sx={{ width: 32, height: 32 }}
+            />
+          </IconButton>
+          <Menu
+            anchorEl={anchorEl}
+            open={Boolean(anchorEl)}
+            onClose={handleMenuClose}
+          >
+            <MenuItem onClick={() => { handleMenuClose(); navigate(currentUser?.userType === 'staff' ? '/staff/profile' : '/user/profile'); }}>
+              <ListItemIcon>
+                <PersonIcon fontSize="small" />
+              </ListItemIcon>
+              Profile
+            </MenuItem>
+            <MenuItem onClick={() => { handleMenuClose(); navigate(currentUser?.userType === 'staff' ? '/staff/settings' : '/user/settings'); }}>
+              <ListItemIcon>
+                <SettingsIcon fontSize="small" />
+              </ListItemIcon>
+              Settings
+            </MenuItem>
+            <Divider />
+            <MenuItem onClick={handleLogout}>
+              <ListItemIcon>
+                <LogoutIcon fontSize="small" />
+              </ListItemIcon>
+              Logout
+            </MenuItem>
+          </Menu>
+        </Toolbar>
+      </AppBar>
+      <Box
+        component="nav"
+        sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
       >
-        <Box sx={{ p: 2 }}>
-          <Typography variant="h6" noWrap component="div">
-            Hotel Management
-          </Typography>
-        </Box>
-        <Divider />
-        {renderMenuItems(currentUser?.userType === 'user' ? userMenuItems : staffMenuItems)}
-      </Drawer>
-
-      {/* Main Content */}
+        {mobileOpen ? (
+          <Drawer
+            variant="temporary"
+            open={mobileOpen}
+            onClose={handleDrawerToggle}
+            ModalProps={{
+              keepMounted: true,
+            }}
+            sx={{
+              display: { xs: 'block', sm: 'none' },
+              '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            }}
+          >
+            {drawer}
+          </Drawer>
+        ) : (
+          <Drawer
+            variant="permanent"
+            sx={{
+              display: { xs: 'none', sm: 'block' },
+              '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            }}
+            open
+          >
+            {drawer}
+          </Drawer>
+        )}
+      </Box>
       <Box
         component="main"
         sx={{
           flexGrow: 1,
           p: 3,
-          width: { sm: `calc(100% - ${240}px)` },
-          ml: { sm: `${240}px` },
-          backgroundColor: 'background.default',
+          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          mt: '64px',
         }}
       >
-        {/* Top Bar */}
-        <AppBar
-          position="fixed"
-          sx={{
-            width: { sm: `calc(100% - ${240}px)` },
-            ml: { sm: `${240}px` },
-            backgroundColor: 'background.paper',
-            color: 'text.primary',
-            boxShadow: 1,
-          }}
-        >
-          <Toolbar>
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={handleDrawerToggle}
-              sx={{ mr: 2, display: { sm: 'none' } }}
-            >
-              <MenuIcon />
-            </IconButton>
-            <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-              {currentUser?.userType === 'user' ? 'Guest Dashboard' : 'Staff Dashboard'}
-            </Typography>
-            <IconButton
-              onClick={handleMenuOpen}
-              size="large"
-              edge="end"
-              aria-label="account of current user"
-              aria-controls="account-menu"
-              aria-haspopup="true"
-              color="inherit"
-            >
-              <AccountCircle />
-            </IconButton>
-            <Menu
-              anchorEl={anchorEl}
-              anchorOrigin={{
-                vertical: 'top',
-                horizontal: 'right',
-              }}
-              id="account-menu"
-              keepMounted
-              transformOrigin={{
-                vertical: 'top',
-                horizontal: 'right',
-              }}
-              open={Boolean(anchorEl)}
-              onClose={handleMenuClose}
-              PaperProps={{
-                sx: {
-                  mt: 1.5,
-                  minWidth: 180,
-                },
-              }}
-            >
-              <MenuItem onClick={() => {
-                handleMenuClose();
-                navigate(currentUser?.userType === 'user' ? '/user/profile' : '/staff/profile');
-              }}>
-                <ListItemIcon>
-                  <PersonIcon fontSize="small" />
-                </ListItemIcon>
-                Profile
-              </MenuItem>
-              <MenuItem onClick={handleLogout}>
-                <ListItemIcon>
-                  <LogoutIcon fontSize="small" />
-                </ListItemIcon>
-                Logout
-              </MenuItem>
-            </Menu>
-          </Toolbar>
-        </AppBar>
-
-        {/* Page Content */}
-        <Toolbar /> {/* Spacer for fixed AppBar */}
+        <Toolbar />
         {children}
       </Box>
+      <ChatBot />
     </Box>
   );
 };
 
-export default Layout; 
+export default Layout;
