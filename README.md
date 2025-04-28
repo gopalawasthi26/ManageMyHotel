@@ -78,9 +78,6 @@ src/
 - Firebase (Authentication, Firestore)
 - Material-UI
 - React Router
-- Formik & Yup
-- React Toastify
-- Date-fns
 
 ## Contributing
 
