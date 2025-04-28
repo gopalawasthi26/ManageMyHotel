@@ -27,7 +27,7 @@ import {
   CheckCircle as CheckCircleIcon,
 } from '@mui/icons-material';
 import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db } from '../../firebase/config';
 import { toast } from 'react-toastify';
 
 const ManageUsers = () => {

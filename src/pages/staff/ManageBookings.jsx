@@ -23,35 +23,58 @@ import {
   Select,
   MenuItem,
   TextField,
+  Grid,
+  Stepper,
+  Step,
+  StepLabel,
+  Card,
+  CardContent,
+  Divider,
+  Alert,
 } from '@mui/material';
 import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   CheckCircle as CheckInIcon,
   ExitToApp as CheckOutIcon,
+  Payment as PaymentIcon,
+  CreditCard as CreditCardIcon,
+  LocalAtm as LocalAtmIcon,
+  Info as InfoIcon,
+  Cancel as CancelIcon,
 } from '@mui/icons-material';
-import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { collection, getDocs, doc, updateDoc, deleteDoc, query, where, getDoc, writeBatch } from 'firebase/firestore';
+import { db } from '../../firebase/config';
 import { toast } from 'react-toastify';
 import { format } from 'date-fns';
-import { DatePicker } from "@mui/x-date-pickers/DatePicker";
-import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
-import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
+import { useAuth } from '../../contexts/AuthContext';
 
 const ManageBookings = () => {
+  const { currentUser } = useAuth();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
-  const [formData, setFormData] = useState({
-    status: '',
-    checkInDate: '',
-    checkOutDate: '',
-    totalAmount: '',
-  });
+  const [activeStep, setActiveStep] = useState(0);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [paymentMethod, setPaymentMethod] = useState('desk');
+  const [razorpayLoaded, setRazorpayLoaded] = useState(false);
+
+  const steps = ['Booked', 'Booked & Paid', 'Checked In', 'Checked Out'];
 
   useEffect(() => {
     fetchBookings();
+    // Initialize RazorPay
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => setRazorpayLoaded(true);
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
   }, []);
 
   const fetchBookings = async () => {
@@ -71,179 +94,274 @@ const ManageBookings = () => {
 
   const handleOpenDialog = (booking) => {
     setSelectedBooking(booking);
-    setFormData({
-      status: booking.status || '',
-      checkInDate: booking.checkInDate || '',
-      checkOutDate: booking.checkOutDate || '',
-      totalAmount: booking.totalAmount || '',
-    });
+    setActiveStep(getStepIndex(booking.status));
     setOpenDialog(true);
   };
 
-  const handleCloseDialog = () => {
-    setOpenDialog(false);
-    setSelectedBooking(null);
-    setFormData({
-      status: '',
-      checkInDate: '',
-      checkOutDate: '',
-      totalAmount: '',
-    });
-  };
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-
-  const handleUpdateBooking = async () => {
-    try {
-      await updateDoc(doc(db, 'bookings', selectedBooking.id), formData);
-      toast.success('Booking updated successfully');
-      handleCloseDialog();
-      fetchBookings();
-    } catch (error) {
-      toast.error('Failed to update booking');
-    }
-  };
-
-  const handleDeleteBooking = async (bookingId) => {
-    if (window.confirm('Are you sure you want to delete this booking?')) {
-      try {
-        await deleteDoc(doc(db, 'bookings', bookingId));
-        toast.success('Booking deleted successfully');
-        fetchBookings();
-      } catch (error) {
-        toast.error('Failed to delete booking');
-      }
-    }
-  };
-
-  const handleCheckIn = async (booking) => {
-    try {
-      await updateDoc(doc(db, 'bookings', booking.id), {
-        status: 'checked-in'
-      });
-      await updateDoc(doc(db, 'rooms', booking.roomId), {
-        status: 'occupied'
-      });
-      toast.success('Guest checked in successfully');
-      fetchBookings();
-    } catch (error) {
-      toast.error('Failed to check in guest');
-    }
-  };
-
-  const handleCheckOut = async (booking) => {
-    try {
-      await updateDoc(doc(db, 'bookings', booking.id), {
-        status: 'checked-out'
-      });
-      await updateDoc(doc(db, 'rooms', booking.roomId), {
-        status: 'available'
-      });
-      toast.success('Guest checked out successfully');
-      fetchBookings();
-    } catch (error) {
-      toast.error('Failed to check out guest');
-    }
-  };
-
-  const getStatusColor = (status) => {
+  const getStepIndex = (status) => {
     switch (status) {
-      case 'confirmed':
-        return 'success';
-      case 'pending':
-        return 'warning';
-      case 'checked-in':
-        return 'info';
-      case 'checked-out':
-        return 'default';
-      case 'cancelled':
-        return 'error';
-      default:
-        return 'default';
+      case 'booked': return 0;
+      case 'booked_paid': return 1;
+      case 'checked_in': return 2;
+      case 'checked_out': return 3;
+      default: return 0;
+    }
+  };
+
+  const handlePayment = async (amount) => {
+    if (paymentMethod === 'online' && razorpayLoaded) {
+      try {
+        const response = await fetch('/api/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount: amount * 100 }) // Convert to paise
+        });
+        const order = await response.json();
+
+        const options = {
+          key: process.env.REACT_APP_RAZORPAY_KEY_ID,
+          amount: amount * 100,
+          currency: 'INR',
+          name: 'Hotel Management',
+          description: `Payment for Booking #${selectedBooking.id}`,
+          order_id: order.id,
+          handler: async (response) => {
+            await handlePaymentSuccess(response);
+          },
+          prefill: {
+            email: selectedBooking.userEmail,
+            contact: selectedBooking.userPhone
+          },
+          theme: {
+            color: '#556cd6'
+          }
+        };
+
+        const razorpay = new window.Razorpay(options);
+        razorpay.open();
+      } catch (error) {
+        console.error('Error processing online payment:', error);
+        toast.error('Failed to process online payment');
+      }
+    } else {
+      handleDeskPayment(amount);
+    }
+  };
+
+  const handlePaymentSuccess = async (response) => {
+    try {
+      const batch = writeBatch(db);
+      const bookingRef = doc(db, 'bookings', selectedBooking.id);
+      const roomRef = doc(db, 'rooms', selectedBooking.roomId);
+
+      batch.update(bookingRef, {
+        status: 'booked_paid',
+        paymentStatus: 'completed',
+        paymentMethod: 'online',
+        paymentId: response.razorpay_payment_id,
+        lastUpdated: new Date().toISOString()
+      });
+
+      batch.update(roomRef, {
+        status: 'booked',
+        currentBooking: selectedBooking.id
+      });
+
+      const paymentRef = doc(collection(db, 'payments'));
+      batch.set(paymentRef, {
+        bookingId: selectedBooking.id,
+        amount: paymentAmount,
+        paymentMethod: 'online',
+        paymentId: response.razorpay_payment_id,
+        status: 'completed',
+        processedAt: new Date().toISOString()
+      });
+
+      await batch.commit();
+      toast.success('Payment processed successfully');
+      setPaymentDialogOpen(false);
+      fetchBookings();
+    } catch (error) {
+      console.error('Error recording payment:', error);
+      toast.error('Failed to record payment');
+    }
+  };
+
+  const handleDeskPayment = async (amount) => {
+    try {
+      const batch = writeBatch(db);
+      const bookingRef = doc(db, 'bookings', selectedBooking.id);
+      const roomRef = doc(db, 'rooms', selectedBooking.roomId);
+
+      batch.update(bookingRef, {
+        status: 'booked_paid',
+        paymentStatus: 'completed',
+        paymentMethod: 'desk',
+        lastUpdated: new Date().toISOString()
+      });
+
+      batch.update(roomRef, {
+        status: 'booked',
+        currentBooking: selectedBooking.id
+      });
+
+      const paymentRef = doc(collection(db, 'payments'));
+      batch.set(paymentRef, {
+        bookingId: selectedBooking.id,
+        amount: amount,
+        paymentMethod: 'desk',
+        status: 'completed',
+        processedBy: currentUser.uid,
+        processedAt: new Date().toISOString()
+      });
+
+      await batch.commit();
+      toast.success('Payment recorded successfully');
+      setPaymentDialogOpen(false);
+      fetchBookings();
+    } catch (error) {
+      console.error('Error recording payment:', error);
+      toast.error('Failed to record payment');
+    }
+  };
+
+  const handleNext = async () => {
+    try {
+      const batch = writeBatch(db);
+      const bookingRef = doc(db, 'bookings', selectedBooking.id);
+      const roomRef = doc(db, 'rooms', selectedBooking.roomId);
+
+      switch (activeStep) {
+        case 0: // Booked to Booked & Paid
+          setPaymentDialogOpen(true);
+          return;
+
+        case 1: // Booked & Paid to Checked In
+          batch.update(bookingRef, {
+            status: 'checked_in',
+            checkInDate: new Date().toISOString(),
+            lastUpdated: new Date().toISOString()
+          });
+          batch.update(roomRef, {
+            status: 'occupied'
+          });
+          break;
+
+        case 2: // Checked In to Checked Out
+          batch.update(bookingRef, {
+            status: 'checked_out',
+            checkOutDate: new Date().toISOString(),
+            lastUpdated: new Date().toISOString()
+          });
+          batch.update(roomRef, {
+            status: 'needs_cleaning',
+            currentBooking: null
+          });
+          break;
+      }
+
+      await batch.commit();
+      toast.success('Status updated successfully');
+      setOpenDialog(false);
+      fetchBookings();
+    } catch (error) {
+      console.error('Error updating status:', error);
+      toast.error('Failed to update status');
+    }
+  };
+
+  const handleCancelBooking = async (booking) => {
+    if (!window.confirm('Are you sure you want to cancel this booking?')) {
+      return;
+    }
+
+    try {
+      const batch = writeBatch(db);
+      const bookingRef = doc(db, 'bookings', booking.id);
+      const roomRef = doc(db, 'rooms', booking.roomId);
+
+      batch.update(bookingRef, {
+        status: 'cancelled',
+        lastUpdated: new Date().toISOString()
+      });
+
+      batch.update(roomRef, {
+        status: 'available',
+        currentBooking: null
+      });
+
+      await batch.commit();
+      toast.success('Booking cancelled successfully');
+      fetchBookings();
+    } catch (error) {
+      console.error('Error cancelling booking:', error);
+      toast.error('Failed to cancel booking');
     }
   };
 
   return (
     <Container maxWidth="lg">
       <Box sx={{ mt: 4, mb: 4 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
+        <Typography variant="h4" gutterBottom>
           Manage Bookings
         </Typography>
+
         <TableContainer component={Paper}>
           <Table>
             <TableHead>
               <TableRow>
                 <TableCell>Booking ID</TableCell>
                 <TableCell>Guest Name</TableCell>
-                <TableCell>Room</TableCell>
+                <TableCell>Room Number</TableCell>
                 <TableCell>Check In</TableCell>
                 <TableCell>Check Out</TableCell>
-                <TableCell>Total Amount</TableCell>
                 <TableCell>Status</TableCell>
+                <TableCell>Payment</TableCell>
                 <TableCell>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {bookings.map((booking) => (
                 <TableRow key={booking.id}>
-                  <TableCell>{booking.id}</TableCell>
+                  <TableCell>{booking.id.slice(0, 8)}</TableCell>
                   <TableCell>{booking.guestName}</TableCell>
-                  <TableCell>Room {booking.roomNumber}</TableCell>
-                  <TableCell>
-                    {format(new Date(booking.checkInDate), 'MMM dd, yyyy')}
-                  </TableCell>
-                  <TableCell>
-                    {format(new Date(booking.checkOutDate), 'MMM dd, yyyy')}
-                  </TableCell>
-                  <TableCell>${booking.totalAmount}</TableCell>
+                  <TableCell>{booking.roomNumber}</TableCell>
+                  <TableCell>{format(new Date(booking.checkInDate), 'MMM dd, yyyy')}</TableCell>
+                  <TableCell>{format(new Date(booking.checkOutDate), 'MMM dd, yyyy')}</TableCell>
                   <TableCell>
                     <Chip
-                      label={booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
-                      color={getStatusColor(booking.status)}
-                      size="small"
+                      label={booking.status}
+                      color={
+                        booking.status === 'booked_paid' ? 'success' :
+                        booking.status === 'booked' ? 'primary' :
+                        booking.status === 'checked_in' ? 'info' :
+                        booking.status === 'checked_out' ? 'default' :
+                        booking.status === 'cancelled' ? 'error' : 'default'
+                      }
                     />
                   </TableCell>
                   <TableCell>
-                    <Tooltip title="Edit">
-                      <IconButton
-                        color="primary"
-                        onClick={() => handleOpenDialog(booking)}
-                      >
-                        <EditIcon />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Check In">
-                      <IconButton
-                        color="primary"
-                        onClick={() => handleCheckIn(booking)}
-                        disabled={booking.status === 'checked-in'}
-                      >
-                        <CheckInIcon />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Check Out">
-                      <IconButton
-                        color="secondary"
-                        onClick={() => handleCheckOut(booking)}
-                        disabled={booking.status !== 'checked-in'}
-                      >
-                        <CheckOutIcon />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Delete">
-                      <IconButton
-                        color="error"
-                        onClick={() => handleDeleteBooking(booking.id)}
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </Tooltip>
+                    <Chip
+                      icon={booking.paymentMethod === 'online' ? <CreditCardIcon /> : <LocalAtmIcon />}
+                      label={`${booking.paymentStatus} (${booking.paymentMethod || 'pending'})`}
+                      color={booking.paymentStatus === 'completed' ? 'success' : 'warning'}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Tooltip title="Manage Booking">
+                        <IconButton onClick={() => handleOpenDialog(booking)} color="primary">
+                          <EditIcon />
+                        </IconButton>
+                      </Tooltip>
+                      {booking.status !== 'cancelled' && (
+                        <Tooltip title="Cancel Booking">
+                          <IconButton onClick={() => handleCancelBooking(booking)} color="error">
+                            <CancelIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Box>
                   </TableCell>
                 </TableRow>
               ))}
@@ -251,61 +369,115 @@ const ManageBookings = () => {
           </Table>
         </TableContainer>
 
-        {/* Edit Booking Dialog */}
-        <Dialog open={openDialog} onClose={handleCloseDialog}>
-          <DialogTitle>Edit Booking</DialogTitle>
+        {/* Booking Management Dialog */}
+        <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="md" fullWidth>
+          <DialogTitle>
+            Manage Booking
+          </DialogTitle>
           <DialogContent>
-            <FormControl fullWidth margin="normal">
-              <InputLabel>Status</InputLabel>
-              <Select
-                name="status"
-                value={formData.status}
-                onChange={handleChange}
-                label="Status"
-                required
-              >
-                <MenuItem value="pending">Pending</MenuItem>
-                <MenuItem value="confirmed">Confirmed</MenuItem>
-                <MenuItem value="checked-in">Checked In</MenuItem>
-                <MenuItem value="checked-out">Checked Out</MenuItem>
-                <MenuItem value="cancelled">Cancelled</MenuItem>
-              </Select>
-            </FormControl>
-            <TextField
-              fullWidth
-              label="Check In Date"
-              name="checkInDate"
-              type="date"
-              value={formData.checkInDate}
-              onChange={handleChange}
-              margin="normal"
-              InputLabelProps={{ shrink: true }}
-            />
-            <TextField
-              fullWidth
-              label="Check Out Date"
-              name="checkOutDate"
-              type="date"
-              value={formData.checkOutDate}
-              onChange={handleChange}
-              margin="normal"
-              InputLabelProps={{ shrink: true }}
-            />
-            <TextField
-              fullWidth
-              label="Total Amount"
-              name="totalAmount"
-              type="number"
-              value={formData.totalAmount}
-              onChange={handleChange}
-              margin="normal"
-              required
-            />
+            {selectedBooking && (
+              <Box sx={{ mt: 2 }}>
+                <Grid container spacing={3}>
+                  <Grid item xs={12}>
+                    <Stepper activeStep={activeStep}>
+                      {steps.map((label) => (
+                        <Step key={label}>
+                          <StepLabel>{label}</StepLabel>
+                        </Step>
+                      ))}
+                    </Stepper>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="h6" gutterBottom>
+                          Booking Details
+                        </Typography>
+                        <Grid container spacing={2}>
+                          <Grid item xs={6}>
+                            <Typography variant="body2" color="text.secondary">
+                              Guest Name: {selectedBooking.guestName}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="body2" color="text.secondary">
+                              Room Number: {selectedBooking.roomNumber}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="body2" color="text.secondary">
+                              Check In: {format(new Date(selectedBooking.checkInDate), 'MMM dd, yyyy')}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="body2" color="text.secondary">
+                              Check Out: {format(new Date(selectedBooking.checkOutDate), 'MMM dd, yyyy')}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="body2" color="text.secondary">
+                              Total Amount: ₹{selectedBooking.totalAmount}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="body2" color="text.secondary">
+                              Payment Status: {selectedBooking.paymentStatus || 'Pending'}
+                            </Typography>
+                          </Grid>
+                        </Grid>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              </Box>
+            )}
           </DialogContent>
           <DialogActions>
-            <Button onClick={handleCloseDialog}>Cancel</Button>
-            <Button onClick={handleUpdateBooking} variant="contained" color="primary">
-              Update
+            <Button onClick={() => setOpenDialog(false)}>Close</Button>
+            {activeStep < steps.length - 1 && (
+              <Button onClick={handleNext} variant="contained" color="primary">
+                {activeStep === 0 ? 'Process Payment' : 'Next Step'}
+              </Button>
+            )}
+          </DialogActions>
+        </Dialog>
+
+        {/* Payment Dialog */}
+        <Dialog open={paymentDialogOpen} onClose={() => setPaymentDialogOpen(false)}>
+          <DialogTitle>Process Payment</DialogTitle>
+          <DialogContent>
+            <Box sx={{ mt: 2 }}>
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel>Payment Method</InputLabel>
+                <Select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                  label="Payment Method"
+                >
+                  <MenuItem value="desk">Pay at Desk</MenuItem>
+                  <MenuItem value="online">Pay Online (RazorPay)</MenuItem>
+                </Select>
+              </FormControl>
+              <TextField
+                fullWidth
+                label="Amount"
+                type="number"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                InputProps={{
+                  startAdornment: '₹'
+                }}
+              />
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setPaymentDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => handlePayment(paymentAmount)}
+              variant="contained"
+              color="primary"
+            >
+              Process Payment
             </Button>
           </DialogActions>
         </Dialog>

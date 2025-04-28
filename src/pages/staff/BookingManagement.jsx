@@ -165,7 +165,7 @@ export default function BookingManagement() {
                 <TableCell>
                   {format(new Date(booking.checkOutDate), 'MMM dd, yyyy')}
                 </TableCell>
-                <TableCell>${booking.totalAmount}</TableCell>
+                <TableCell>₹{booking.totalAmount}</TableCell>
                 <TableCell>
                   <Chip
                     label={booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}

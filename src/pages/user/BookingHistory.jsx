@@ -1,21 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
-  Paper,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Paper,
   Button,
-  Chip,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
+  Chip,
   CircularProgress,
+  Container,
+  Alert,
 } from '@mui/material';
 import { collection, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase/config';
@@ -24,65 +26,73 @@ import { toast } from 'react-toastify';
 import { format } from 'date-fns';
 
 const BookingHistory = () => {
+  const { currentUser } = useAuth();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
-  const { currentUser } = useAuth();
+  const [openDialog, setOpenDialog] = useState(false);
 
   useEffect(() => {
     fetchBookings();
-  }, []);
+  }, [currentUser]);
 
   const fetchBookings = async () => {
     try {
-      const bookingsRef = collection(db, 'bookings');
-      const q = query(bookingsRef, where('userId', '==', currentUser.uid));
-      const querySnapshot = await getDocs(q);
-      const bookingsData = querySnapshot.docs.map(doc => ({
+      setLoading(true);
+      const bookingsQuery = query(
+        collection(db, 'bookings'),
+        where('userId', '==', currentUser.uid)
+      );
+      const bookingsSnapshot = await getDocs(bookingsQuery);
+      const bookingsData = bookingsSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
       setBookings(bookingsData);
     } catch (error) {
-      toast.error('Error fetching bookings');
       console.error('Error fetching bookings:', error);
+      toast.error('Failed to fetch booking history');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCancelClick = (booking) => {
+  const handleOpenDialog = (booking) => {
     setSelectedBooking(booking);
-    setCancelDialogOpen(true);
+    setOpenDialog(true);
   };
 
-  const handleCancelClose = () => {
-    setCancelDialogOpen(false);
+  const handleCloseDialog = () => {
+    setOpenDialog(false);
     setSelectedBooking(null);
   };
 
   const handleCancelBooking = async () => {
     try {
-      const bookingRef = doc(db, 'bookings', selectedBooking.id);
-      await updateDoc(bookingRef, {
+      if (!selectedBooking) return;
+
+      // Update booking status
+      await updateDoc(doc(db, 'bookings', selectedBooking.id), {
         status: 'cancelled',
         cancelledAt: new Date().toISOString()
       });
-      
+
       // Update room status back to available
-      const roomRef = doc(db, 'rooms', selectedBooking.roomId);
-      await updateDoc(roomRef, {
+      await updateDoc(doc(db, 'rooms', selectedBooking.roomId), {
         status: 'available'
       });
 
       toast.success('Booking cancelled successfully');
+      handleCloseDialog();
       fetchBookings();
-      handleCancelClose();
     } catch (error) {
-      toast.error('Error cancelling booking');
       console.error('Error cancelling booking:', error);
+      toast.error('Failed to cancel booking');
     }
+  };
+
+  const formatDate = (dateString) => {
+    return format(new Date(dateString), 'MMM dd, yyyy');
   };
 
   const getStatusColor = (status) => {
@@ -91,108 +101,120 @@ const BookingHistory = () => {
         return 'success';
       case 'pending':
         return 'warning';
-      case 'checked-in':
-        return 'info';
-      case 'checked-out':
-        return 'default';
       case 'cancelled':
         return 'error';
+      case 'completed':
+        return 'info';
       default:
         return 'default';
     }
   };
 
-  const formatDate = (dateString) => {
-    try {
-      return format(new Date(dateString), 'MMM dd, yyyy');
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return 'Invalid Date';
-    }
-  };
-
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '200px' }}>
         <CircularProgress />
       </Box>
     );
   }
 
   return (
-    <Box>
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Typography variant="h4" gutterBottom>
         Booking History
       </Typography>
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Booking ID</TableCell>
-              <TableCell>Room Type</TableCell>
-              <TableCell>Check In</TableCell>
-              <TableCell>Check Out</TableCell>
-              <TableCell>Total Amount</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {bookings.map((booking) => (
-              <TableRow key={booking.id}>
-                <TableCell>{booking.id}</TableCell>
-                <TableCell>{booking.roomType}</TableCell>
-                <TableCell>{formatDate(booking.checkInDate)}</TableCell>
-                <TableCell>{formatDate(booking.checkOutDate)}</TableCell>
-                <TableCell>${booking.totalAmount}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={booking.status}
-                    color={getStatusColor(booking.status)}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell>
-                  {booking.status === 'confirmed' && (
+
+      {bookings.length === 0 ? (
+        <Alert severity="info">
+          You haven't made any bookings yet.
+        </Alert>
+      ) : (
+        <TableContainer component={Paper}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Booking ID</TableCell>
+                <TableCell>Room</TableCell>
+                <TableCell>Check-in</TableCell>
+                <TableCell>Check-out</TableCell>
+                <TableCell>Amount</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {bookings.map(booking => (
+                <TableRow key={booking.id}>
+                  <TableCell>{booking.id}</TableCell>
+                  <TableCell>Room {booking.roomNumber}</TableCell>
+                  <TableCell>{formatDate(booking.checkInDate)}</TableCell>
+                  <TableCell>{formatDate(booking.checkOutDate)}</TableCell>
+                  <TableCell>₹{booking.totalAmount}</TableCell>
+                  <TableCell>
+                    <Chip
+                      label={booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
+                      color={getStatusColor(booking.status)}
+                      size="small"
+                    />
+                  </TableCell>
+                  <TableCell>
                     <Button
                       variant="outlined"
-                      color="error"
                       size="small"
-                      onClick={() => handleCancelClick(booking)}
+                      onClick={() => handleOpenDialog(booking)}
+                      disabled={booking.status === 'cancelled' || booking.status === 'completed'}
                     >
-                      Cancel
+                      View Details
                     </Button>
-                  )}
-                  <Button
-                    variant="outlined"
-                    color="primary"
-                    size="small"
-                    sx={{ ml: 1 }}
-                  >
-                    Receipt
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
 
-      <Dialog open={cancelDialogOpen} onClose={handleCancelClose}>
-        <DialogTitle>Cancel Booking</DialogTitle>
+      <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Booking Details</DialogTitle>
         <DialogContent>
-          <Typography>
-            Are you sure you want to cancel this booking? This action cannot be undone.
-          </Typography>
+          {selectedBooking && (
+            <Box>
+              <Typography variant="subtitle1" gutterBottom>
+                Room Information
+              </Typography>
+              <Typography>Room Number: {selectedBooking.roomNumber}</Typography>
+              <Typography>Room Type: {selectedBooking.roomType}</Typography>
+              <Typography>Guest Name: {selectedBooking.guestName}</Typography>
+              <Typography>Number of Guests: {selectedBooking.numberOfGuests}</Typography>
+              <Typography>
+                Check-in: {formatDate(selectedBooking.checkInDate)}
+              </Typography>
+              <Typography>
+                Check-out: {formatDate(selectedBooking.checkOutDate)}
+              </Typography>
+              <Typography>Total Amount: ₹{selectedBooking.totalAmount}</Typography>
+              {selectedBooking.specialRequests && (
+                <Typography>
+                  Special Requests: {selectedBooking.specialRequests}
+                </Typography>
+              )}
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCancelClose}>Keep Booking</Button>
-          <Button onClick={handleCancelBooking} color="error" variant="contained">
-            Cancel Booking
-          </Button>
+          <Button onClick={handleCloseDialog}>Close</Button>
+          {selectedBooking?.status === 'pending' && (
+            <Button
+              onClick={handleCancelBooking}
+              color="error"
+              variant="contained"
+            >
+              Cancel Booking
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
-    </Box>
+    </Container>
   );
 };
 

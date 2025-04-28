@@ -11,7 +11,7 @@ import {
 } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db } from '../../firebase/config';
 import { toast } from 'react-toastify';
 
 const UserProfile = () => {
