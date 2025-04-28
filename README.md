@@ -2,6 +2,15 @@
 
 A modern and user-friendly hotel management system built with React, Vite, and Firebase. This application provides separate interfaces for hotel staff and guests, allowing efficient management of rooms, bookings, and cleaning schedules.
 
+## Important Notes
+
+### Ad Blockers and Security Extensions
+If you're experiencing issues with the application (such as rooms not loading or booking errors), please check if you have any ad blockers or security extensions enabled. These may interfere with the application's functionality. To resolve this:
+
+1. Disable your ad blocker for this site
+2. If using a security extension, add an exception for this domain
+3. Refresh the page after making these changes
+
 ## Features
 
 ### For Guests
@@ -78,6 +87,9 @@ src/
 - Firebase (Authentication, Firestore)
 - Material-UI
 - React Router
+- Formik & Yup
+- React Toastify
+- Date-fns
 
 ## Contributing
 
